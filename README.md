@@ -37,7 +37,7 @@ Clone the Repository
 bash
 Copy
 Edit
-git clone https://github.com/yourusername/adf-app.git
+git clone https://github.com/Ravithakurofficial/Acoustic-Direction-Finder.git
 cd adf-app
 Configure Environment
 
