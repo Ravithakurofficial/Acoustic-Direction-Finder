@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acoustic Direction Finder</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+
+    <style>
+
+        .serial-monitor {
+            margin-top: 40px;
+            width: 90%;
+            height: 200px;
+            overflow-y: auto;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        #monitor {
+            width: 100%;
+            height: 100%;
+            padding: 20px;
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            resize: none;
+            overflow-y: auto;
+        }
+
+
+        .azimuth-hand {
+            position: absolute;
+            width: 2px;
+            height: 45%;
+            background: linear-gradient(to bottom, #003366, #000080);
+            top: 50%;
+            left: 50%;
+            transform-origin: bottom center;
+            transform: translate(-50%, -100%) rotate(0deg);
+            box-shadow: 0 0 10px rgba(0, 0, 255, 0.5);
+            pointer-events: none;
+            /* To prevent any interference with clicking */
+            z-index: 1;
+        }
+
+        .azimuth-hand::after {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 12px solid red;
+        }
+
+        .circle-center {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #fff;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            border: 2px solid red;
+            /* Match the color of the azimuth hand */
+        }
+
+        .circle {
+            position: relative;
+            width: 23%;
+            height: 0;
+            padding-bottom: 23%;
+            border-radius: 50%;
+            border: 1px solid #333;
+            MARGIN-LEFT: 50%;
+            margin-top: -10%;
+        }
+
+        .inner-circle {
+            position: absolute;
+            width: 49%;
+            height: 49%;
+            border-radius: 50%;
+            border: 1px solid #333;
+            top: 49%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .number {
+            position: absolute;
+            width: 5%;
+            height: 5%;
+            text-align: center;
+            transform: translate(-50%, -50%);
+        }
+
+        .text2 {
+            margin-top: 100%;
+            margin-left: 30%;
+        }
+    </style>
+</head>
+
+<body>
+    <script>
+        let monitorData = ''; // Global variable to store monitor data
+        let graphData = []; // Global variable to store all graph data points
+        const pages = {
+            home: `
+    <div class="bg-dark row">
+        <img class="col w-25" src="https://www.drdo.gov.in/drdo/sites/default/files/drdo_logo_0.png?w=100"
+            alt="Logo">
+        <div class="container text-light col gap-3 d-flex justify-content-center my-auto">
+            <button class="btn button-sm btn-primary" onclick="showPage('home')">Home</button>
+            <button class="btn button-sm btn-primary" onclick="showPage('config')">Config</button>
+            <button class="btn button-sm btn-primary" onclick="showPage('map')">Map</button>
+        </div>
+    </div>
+    <h1 class="display-3 fw-bold text-center p-2">Acoustic Direction Finder</h1>
+        <div class="container d-flex justify-content-center">
+            <div class="data">
+                <div class="AzhmatAngle">
+                    <label>Azimuth angle (Degree)*:</label>
+                    <input class="az" id="az" type="number" value="0">
+                </div>
+                <div class="elevation">
+                    <label>Elevation angle (Degree)*:</label>
+                    <input class="eleva" id="eleva" type="number" value="0">
+                </div>
+                <div class="Range">
+                    <label>Range (meter):</label>
+                    <input class="range" id="range" type="number" value="0">
+                </div>
+            </div>
+        </div>
+        <div class="container d-grid justify-content-center">
+            <h3 class="">Directional Clock</h3>
+                <div class="container h-100">
+                    <div class="circle" id="circle">
+                <div class="inner-circle" id="inner-circle"></div>
+                <div class="circle-center"></div>
+                <div id="azimuth-hand" class="azimuth-hand"></div>
+                </div>
+                </div>    
+
+                <div class="col" id="graph" style="width:800px;height:800px;"></div> <!-- Graph container -->
+        </div>
+           
+    `
+        };
+
+        
+        function setupHomePage() {
+            const azInput = document.getElementById('az');
+            const elevationInput = document.getElementById('eleva');
+            const rangeInput = document.getElementById('range');
+            const azimuthHand = document.getElementById('azimuth-hand');
+            const circle = document.getElementById('circle');
+            const innerCircle = document.getElementById('inner-circle');
+
+            const radius = circle.offsetWidth / 2;
+            const centerX = radius;
+            const centerY = radius;
+            const innerRadius = innerCircle.offsetWidth / 2;
+            const innerCenterX = centerX;
+            const innerCenterY = centerY;
+            function drawGraph() {
+                const graphDiv = document.getElementById('graph');
+
+                const data = [{
+                    type: 'scatter3d',
+                    mode: 'markers',
+                    x: graphData.map(d => d.azimuth),
+                    y: graphData.map(d => d.elevation),
+                    z: graphData.map(d => d.range),
+                    marker: {
+                        size: 5,
+                        color: graphData.map(d => d.range),
+                        colorscale: 'Viridis'
+                    }
+                }];
+                const layout = {
+                    scene: {
+                        xaxis: { title: 'Azimuth Angle (Degree)' },
+                        yaxis: { title: 'Elevation Angle (Degree)' },
+                        zaxis: { title: 'Range (meters)' }
+                    }
+                };
+
+                Plotly.newPlot(graphDiv, data, layout);
+            }
+
+            function createNumbers() {
+                for (let i = 0; i < 360; i += 30) {
+                    // Adjust to start at 3 o'clock position
+                    const angle = (360 - i) * (Math.PI / 180);
+                    const x = centerX + radius * 0.85 * Math.cos(angle);
+                    const y = centerY + radius * 0.85 * Math.sin(angle);
+                    const number = document.createElement('div');
+                    number.className = 'number';
+                    number.textContent = i;
+                    number.style.left = `${(x / circle.offsetWidth) * 100}%`;
+                    number.style.top = `${(y / circle.offsetHeight) * 100}%`;
+
+
+                    circle.appendChild(number);
+                }
+
+
+                for (let i = 1; i <= 12; i++) {
+                    const angle = (i - 3) * (Math.PI * 2) / 12;
+                    const x = innerCenterX + innerRadius * 1.6 * Math.cos(angle);
+                    const y = innerCenterY + innerRadius * 1.6 * Math.sin(angle);
+                    const number = document.createElement('div');
+                    number.className = 'number';
+                    number.textContent = i;
+                    number.style.left = `${(x / circle.offsetWidth) * 100}%`;
+                    number.style.top = `${(y / circle.offsetHeight) * 100}%`;
+                    innerCircle.appendChild(number);
+                }
+            }
+
+
+
+            function updateAzimuthHand() {
+                const azValue = parseInt(azInput.value, 10) || 0;
+                // Adjust angle so that 90 degrees is at the top and move anticlockwise
+                const azimuthAngle = (90 - azValue) * (Math.PI / 180);
+                azimuthHand.style.transform = `translate(-50%, -100%) rotate(${azimuthAngle}rad)`;
+            }
+
+            function updateValues(data) {
+                const { azmat, elevation, range } = data;
+                azInput.value = azmat;
+                elevationInput.value = elevation;
+                rangeInput.value = range;
+
+                // Add the new data point to graphData
+                graphData.push({ azimuth: azmat, elevation: elevation, range: range });
+                drawGraph();
+                updateAzimuthHand();
+            }
+
+            function fetchData() {
+                fetch('/api/update-data')
+                    .then(response => response.json())
+                    .then(data => {
+                        updateValues(data);
+                    })
+                    .catch(error => console.error('Error fetching data:', error));
+            }
+
+            createNumbers();
+            updateAzimuthHand();
+
+            fetchData();
+            setInterval(fetchData, 1000); // Fetch data every second
+
+            azInput.addEventListener('input', updateAzimuthHand);
+        }
+
+        function setupConfigPage() {
+            const monitor = document.getElementById('monitor');
+            const bitRateInput = document.getElementById('bit-rate');
+            let port = null;
+            let reader = null;
+            let writer = null;
+
+            monitor.value = monitorData; // Load persisted monitor data
+            monitor.scrollTop = monitor.scrollHeight; // Auto-scroll to bottom
+
+            async function connect() {
+                const bitRate = bitRateInput.value;
+
+                try {
+                    port = await navigator.serial.requestPort(); // Prompt the user to select a port
+                    if (port && bitRate) {
+                        await port.open({ baudRate: parseInt(bitRate) }); // Open the port with the selected bit rate
+
+                        reader = port.readable.getReader();
+                        writer = port.writable.getWriter();
+
+                        monitorData += `Connected successfully at ${bitRate} baud.\n`;
+                        updateMonitor();
+
+                        document.getElementById('disconnect').disabled = false;
+                        readLoop();
+                    } else {
+                        monitorData += 'Please select a Bit Rate.\n';
+                        updateMonitor();
+                    }
+                } catch (error) {
+                    monitorData += `Error connecting: ${error.message}\n`;
+                    updateMonitor();
+                }
+            }
+
+            async function readLoop() {
+                while (port.readable) {
+                    try {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+
+                        const decodedData = new TextDecoder().decode(value);
+                        monitorData += `Data received: ${decodedData}\n`;
+                        updateMonitor();
+                        await sendDataToBackend(decodedData);
+                    } catch (error) {
+                        console.error('Error reading data:', error);
+                        break;
+                    }
+                }
+            }
+
+            async function sendDataToBackend(data) {
+                try {
+                    const response = await fetch('/api/serial-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ data })
+                    });
+
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    console.log('Response from backend:', await response.text());
+                } catch (error) {
+                    console.error('Error sending data to backend:', error);
+                }
+            }
+
+            async function disconnect() {
+                if (reader) reader.releaseLock();
+                if (writer) writer.releaseLock();
+                if (port && port.locked) await port.close();
+
+                monitorData += 'Disconnected.\n';
+                updateMonitor();
+                document.getElementById('disconnect').disabled = true;
+            }
+
+            function updateMonitor() {
+                monitor.value = monitorData;
+                monitor.scrollTop = monitor.scrollHeight; // Auto-scroll to bottom
+            }
+
+            document.getElementById('connect').addEventListener('click', connect);
+            document.getElementById('disconnect').addEventListener('click', disconnect);
+        }
+
+        function setupMapPage() {
+            var map = L.map('map').setView([28.6139, 77.2090], 13); // Delhi coordinates
+
+            // Add a tile layer to the map
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Marker for the origin (your location)
+            var originMarker = L.marker([28.6139, 77.2090]).addTo(map)
+                .bindPopup("You are here (Origin)").openPopup();
+
+            // Marker for the second person (example coordinates)
+            var secondMarker = L.marker([28.7041, 77.1025]).addTo(map)
+                .bindPopup("Second Person");
+
+            // Search function
+            function searched() {
+                var geocoder = L.Control.Geocoder.nominatim();
+                var query = document.getElementById('search').value;
+
+                geocoder.geocode(query, function (results) {
+                    if (results.length > 0) {
+                        var result = results[0];
+                        map.setView(result.center, 15);
+                        L.marker(result.center).addTo(map)
+                            .bindPopup(result.name || result.html || 'Searched location').openPopup();
+                    } else {
+                        alert('Place not found!');
+                    }
+                });
+            }
+        }
+
+        // Initialize the default page
+        showPage('home');
+
+    </script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</body>
+
+</html>
